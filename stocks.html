@@ -582,7 +582,7 @@ function renderSources(){
  const el=document.getElementById("sourceList");
  if(!el)return;
  const keys=Object.keys(SOURCES);
- if(!keys.length){el.innerHTML='<p style="font-size:12.5px;color:var(--faint)">No statements connected yet. Upload one or more platforms above.</p>';return;}
+ if(!keys.length){el.innerHTML='<p style="font-size:12.5px;color:var(--faint)">No statements connected yet. Upload one or both platforms above.</p>';return;}
  el.innerHTML=keys.map(b=>{
   const s=SOURCES[b];
   return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">'+
@@ -677,7 +677,7 @@ function render(){
  });
  document.getElementById("holdCount").textContent=rows.length+" stocks";
  document.getElementById("tbody").innerHTML=rows.map(d=>'<tr>'+
-  '<td><div class="fund-nm">'+d.name+'</div><div class="fund-house">'+(d.sector||"")+(d.brokerList&&d.brokerList.length?' · '+d.brokerList.join(", "):'')+(d.isin?' · '+d.isin:'')+'</div></td>'+
+  '<td><div class="fund-nm">'+d.name+'</div><div class="fund-house">'+(d.sector||"")+(d.isin?' · '+d.isin:'')+'</div></td>'+
   '<td class="r">'+Number(d.qty).toLocaleString("en-IN",{maximumFractionDigits:4})+'</td>'+
   '<td class="r">'+fmt2(d.avg)+'</td>'+
   '<td class="r">'+fmt2(d.ltp)+'</td>'+
@@ -789,10 +789,9 @@ function renderAnalysis(){
   return '<div style="margin-bottom:16px"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px"><span>'+label+'</span><span style="color:var(--muted)">'+leftLbl+' '+p.toFixed(1)+'% · '+rightLbl+' '+(100-p).toFixed(1)+'%</span></div>'+
    '<div class="track" style="height:9px"><div class="fill" style="width:'+p+'%;background:'+color+'"></div></div>'+
    '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);margin-top:3px"><span>'+lakh(leftV)+'</span><span>'+lakh(rightV)+'</span></div></div>';};
- const top5V=[...DATA_LIVE].sort((a,b)=>b.value-a.value).slice(0,5).reduce((s,d)=>s+d.value,0);
  document.getElementById("structRows").innerHTML=
   meter("Winning vs losing positions (by value)","In profit",winV,"In loss",loseV,"#4fd08c")+
-  meter("Top-5 stocks vs rest","Top 5",top5V,"Rest",totVal-top5V,"#8b9dd9")+
+  meter("Top-5 stocks vs rest","Top 5",[...DATA_LIVE].sort((a,b)=>b.value-a.value).slice(0,5).reduce((s,d)=>s+d.value,0),"Rest",0+ (totVal-[...DATA_LIVE].sort((a,b)=>b.value-a.value).slice(0,5).reduce((s,d)=>s+d.value,0)),"#8b9dd9")+
   meter("Largest sector vs rest","Top sector",houses.length?houses[0][1].value:0,"Other sectors",totVal-(houses.length?houses[0][1].value:0),"#d4af37")+
   '<p style="font-size:11px;color:var(--faint)">A healthy book keeps single-stock weight modest and avoids one sector dominating outcomes.</p>';
 
@@ -887,7 +886,7 @@ function resetPortfolio(){
  try{localStorage.removeItem(STORE_KEY);localStorage.setItem(CLEAR_KEY,"1")}catch(e){}
  DATA_LIVE=[];consolidate();refreshAll();
  const st=document.getElementById("importStatus");
- if(st){st.textContent="✔ Cleared. Upload broker statements to rebuild the consolidated view.";st.style.color="var(--muted)";}
+ if(st){st.textContent="✔ Cleared. Upload Groww and/or Zerodha statements to rebuild the consolidated view.";st.style.color="var(--muted)";}
  document.getElementById("navLive").textContent="Import a statement to begin";
 }
 
