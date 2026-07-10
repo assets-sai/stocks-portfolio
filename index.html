@@ -621,7 +621,7 @@ async function loadStatement(buf,fname,broker){
 const norm=s=>(s||"").toString().toUpperCase().replace(/[^A-Z0-9]/g,"");
 const keyOf=d=>d.isin||norm(d.name);
 const LIVE_PRICES={};                       // key -> {price, date}
-const SYMCACHE_KEY="saiassets_stocks_symbols_v1";
+const SYMCACHE_KEY="saiassets_stocks_symbols_v2";
 let SYMCACHE={}; try{SYMCACHE=JSON.parse(localStorage.getItem(SYMCACHE_KEY)||"{}")}catch(e){}
 function saveSymCache(){try{localStorage.setItem(SYMCACHE_KEY,JSON.stringify(SYMCACHE))}catch(e){}}
 function fetchTO(u,ms){
@@ -648,21 +648,32 @@ async function proxiedJSON(url){
  return null;
 }
 // resolve a holding to a Yahoo symbol (e.g. HDFCBANK.NS). Zerodha names are already tickers.
-async function resolveSymbol(d){
- const k=keyOf(d);
- if(SYMCACHE[k])return SYMCACHE[k];
- const nm=d.name.trim();
- // looks like an NSE ticker already
- if(/^[A-Z0-9][A-Z0-9&\-]{0,14}$/.test(nm.replace(/\s+/g,""))&&!/\s/.test(nm)){
-  const guess=nm.replace(/[^A-Z0-9]/g,"")+".NS";
-  SYMCACHE[k]=guess;saveSymCache();return guess;
- }
- // otherwise search Yahoo by company name
- const j=await proxiedJSON("https://query1.finance.yahoo.com/v1/finance/search?q="+encodeURIComponent(nm)+"&quotesCount=8&newsCount=0");
+// return an ordered list of candidate Yahoo symbols (NSE preferred, then BSE)
+async function searchSymbols(q){
+ const j=await proxiedJSON("https://query1.finance.yahoo.com/v1/finance/search?q="+encodeURIComponent(q)+"&quotesCount=10&newsCount=0");
  const quotes=(j&&j.quotes)||[];
- const pick=quotes.find(q=>q.symbol&&/\.NS$/.test(q.symbol))||quotes.find(q=>q.symbol&&/\.BO$/.test(q.symbol))||quotes.find(q=>q.symbol);
- if(pick&&pick.symbol){SYMCACHE[k]=pick.symbol;saveSymCache();return pick.symbol;}
- return null;
+ const eq=quotes.filter(x=>x.symbol&&(!x.quoteType||x.quoteType==="EQUITY"));
+ const ns=eq.filter(x=>/\.NS$/.test(x.symbol)).map(x=>x.symbol);
+ const bo=eq.filter(x=>/\.BO$/.test(x.symbol)).map(x=>x.symbol);
+ const rest=eq.map(x=>x.symbol);
+ return [...ns,...bo,...rest];
+}
+async function symbolCandidates(d){
+ const nm=(d.name||"").trim();
+ const cands=[];
+ const push=s=>{if(s&&cands.indexOf(s)<0)cands.push(s);};
+ // 1) ISIN search is the most reliable resolver for Indian equities
+ if(d.isin&&/^[A-Z]{2}[A-Z0-9]{9}\d$/i.test(d.isin)){
+  try{(await searchSymbols(d.isin)).forEach(push);}catch(e){}
+ }
+ // 2) direct ticker guesses when the holding name is already a bare symbol
+ if(!/\s/.test(nm)&&/^[A-Z0-9][A-Z0-9&.\-]{0,14}$/i.test(nm.replace(/\s+/g,""))){
+  const t=nm.replace(/[^A-Z0-9]/gi,"").toUpperCase();
+  push(t+".NS");push(t+".BO");
+ }
+ // 3) full-text name search
+ if(nm){try{(await searchSymbols(nm)).forEach(push);}catch(e){}}
+ return cands;
 }
 const LIVE_META={}; // key -> {price,date,w52h,w52l,chgPct,pe,pb,divYield,mcap,coName}
 async function fetchQuote(sym){
@@ -706,21 +717,23 @@ async function updateLivePrices(){
   for(const d of items){
    const k=keyOf(d);
    try{
-    let sym=await resolveSymbol(d);
-    if(!sym)continue;
-    let q=await fetchQuote(sym);
-    // if a bare-ticker guess failed, try a name search as fallback
-    if(!q&&/\.NS$/.test(sym)&&!/\s/.test(d.name)){
-     delete SYMCACHE[k];saveSymCache();
-     sym=await resolveSymbol(d);
-     if(sym)q=await fetchQuote(sym);
+    let sym=SYMCACHE[k]||null, q=null;
+    // try the cached symbol first; verify it still quotes
+    if(sym)q=await fetchQuote(sym);
+    // otherwise walk candidate symbols until one returns a live quote
+    if(!q){
+     const cands=await symbolCandidates(d);
+     for(const c of cands){q=await fetchQuote(c);if(q){sym=c;break;}}
     }
-    if(q){
+    if(q&&sym){
+     SYMCACHE[k]=sym;saveSymCache();          // cache only VERIFIED symbols
      LIVE_PRICES[k]={price:q.price,date:q.date};hit++;lastDate=q.date;
      const m=LIVE_META[k]||(LIVE_META[k]={});
      m.price=q.price;m.date=q.date;m.w52h=q.w52h;m.w52l=q.w52l;m.chgPct=q.chgPct;m.sym=sym;
-     // fundamentals are best-effort; don't block price display if they fail
+     // fundamentals are best-effort (Yahoo crumb-gated); never block price display
      try{const f=await fetchFundamentals(sym);if(f){m.pe=f.pe;m.pb=f.pb;m.divYield=f.divYield;m.mcap=f.mcap;m.coName=f.coName;}}catch(e){}
+    }else if(sym&&SYMCACHE[k]&&!q){
+     delete SYMCACHE[k];saveSymCache();        // drop a stale cached symbol that no longer quotes
     }
    }catch(e){}
   }
