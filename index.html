@@ -624,17 +624,27 @@ const LIVE_PRICES={};                       // key -> {price, date}
 const SYMCACHE_KEY="saiassets_stocks_symbols_v1";
 let SYMCACHE={}; try{SYMCACHE=JSON.parse(localStorage.getItem(SYMCACHE_KEY)||"{}")}catch(e){}
 function saveSymCache(){try{localStorage.setItem(SYMCACHE_KEY,JSON.stringify(SYMCACHE))}catch(e){}}
+function fetchTO(u,ms){
+ const c=new AbortController();const t=setTimeout(()=>c.abort(),ms||9000);
+ return fetch(u,{cache:"no-store",signal:c.signal}).finally(()=>clearTimeout(t));
+}
 async function proxiedJSON(url){
- // Prefer our own same-origin serverless proxy (no CORS, reliable on Vercel),
- // then fall back to public CORS proxies for local/file usage.
+ // 1) Same-origin serverless proxy is authoritative on Vercel. If it responds at
+ //    all (even a non-2xx like a Yahoo 401), trust it and DON'T fall through to the
+ //    public proxies -- those can hang and freeze the whole refresh loop.
+ try{
+  const r=await fetchTO("/api/yf?url="+encodeURIComponent(url),9000);
+  if(r.ok){const j=await r.json().catch(()=>null);if(j)return j;}
+  return null;
+ }catch(e){}
+ // 2) Same-origin proxy unreachable (opened as a local file): try public CORS
+ //    proxies, each time-boxed so a dead proxy can never hang the loop.
  const tries=[
-  "/api/yf?url="+encodeURIComponent(url),
   "https://api.allorigins.win/raw?url="+encodeURIComponent(url),
   "https://corsproxy.io/?url="+encodeURIComponent(url),
-  "https://api.codetabs.com/v1/proxy/?quest="+encodeURIComponent(url),
-  url
+  "https://api.codetabs.com/v1/proxy/?quest="+encodeURIComponent(url)
  ];
- for(const u of tries){try{const r=await fetch(u,{cache:"no-store"});if(r.ok){const j=await r.json();if(j)return j;}}catch(e){}}
+ for(const u of tries){try{const r=await fetchTO(u,8000);if(r.ok){const j=await r.json().catch(()=>null);if(j)return j;}}catch(e){}}
  return null;
 }
 // resolve a holding to a Yahoo symbol (e.g. HDFCBANK.NS). Zerodha names are already tickers.
